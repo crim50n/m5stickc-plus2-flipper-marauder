@@ -3,9 +3,9 @@
 #ifndef stickcLED_H
 #define stickcLED_H
 
-#if defined(MARAUDER_M5STICKC) || defined(MARAUDER_M5STICKCP2)
-
 #include "configs.h"
+
+#if defined(MARAUDER_M5STICKC) || defined(MARAUDER_M5STICKCP2)
 #include "settings.h"
 
 #include <Arduino.h>

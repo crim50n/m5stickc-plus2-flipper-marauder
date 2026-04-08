@@ -48,6 +48,10 @@ https://www.online-utility.org/image/convert/to/XBM
   #include "MenuFunctions.h"
 #endif
 
+#ifdef MARAUDER_M5STICKCP2_FLIPPER
+  #include <TFT_eSPI.h>
+#endif
+
 #ifdef HAS_BUTTONS
   #include "Switches.h"
   
@@ -113,6 +117,152 @@ const String PROGMEM version_number = MARAUDER_VERSION;
 #endif
 
 uint32_t currentTime  = 0;
+
+#ifdef MARAUDER_M5STICKCP2_FLIPPER
+  TFT_eSPI flipper_status_tft = TFT_eSPI();
+  uint32_t flipper_status_last_draw = 0;
+  uint32_t flipper_status_last_activity = 0;
+  bool flipper_status_dimmed = false;
+  bool flipper_status_off = false;
+  uint8_t flipper_status_prev_mode = 255;
+  uint8_t flipper_status_prev_channel = 255;
+  bool flipper_status_prev_scanning = false;
+  static const uint16_t FLIPPER_ORANGE = 0xFD20;
+  static const uint16_t FLIPPER_BG = TFT_BLACK;
+  static const int FLIPPER_FP = 1;
+  static const int FLIPPER_LH = 8;
+  static const uint32_t FLIPPER_DIM_TIMEOUT = 20000;
+  static const uint32_t FLIPPER_OFF_TIMEOUT = 25000;
+  static const uint8_t FLIPPER_MIN_BRIGHT = 190;
+
+  int flipper_status_prev_battery = -1;
+
+  int getFlipperBatteryPercent() {
+    static bool battery_pin_initialized = false;
+    if (!battery_pin_initialized) {
+      pinMode(38, INPUT);
+      battery_pin_initialized = true;
+    }
+
+    uint32_t adcReading = analogReadMilliVolts(38);
+    float actualVoltage = (float)adcReading * 2.0f;
+    const float MIN_VOLTAGE = 3300.0f;
+    const float MAX_VOLTAGE = 4150.0f;
+    float percent = ((actualVoltage - MIN_VOLTAGE) / (MAX_VOLTAGE - (MIN_VOLTAGE + 50.0f))) * 100.0f;
+
+    if (percent < 1.0f) percent = 1.0f;
+    if (percent > 100.0f) percent = 100.0f;
+    return (int)percent;
+  }
+
+  void flipperSetBrightness(uint8_t brightval) {
+    if (brightval == 0) {
+      analogWrite(TFT_BL, 0);
+    } else {
+      int bl = FLIPPER_MIN_BRIGHT + round(((255 - FLIPPER_MIN_BRIGHT) * brightval / 100.0f));
+      analogWrite(TFT_BL, bl);
+    }
+  }
+
+  void flipperWakeScreen() {
+    flipper_status_last_activity = millis();
+    if (flipper_status_off || flipper_status_dimmed) {
+      flipper_status_off = false;
+      flipper_status_dimmed = false;
+      flipperSetBrightness(100);
+    }
+  }
+
+  void flipperPowerSaveTick() {
+    uint32_t elapsed = millis() - flipper_status_last_activity;
+    if (!flipper_status_dimmed && elapsed >= FLIPPER_DIM_TIMEOUT) {
+      flipper_status_dimmed = true;
+      flipperSetBrightness(5);
+    }
+    if (!flipper_status_off && elapsed >= FLIPPER_OFF_TIMEOUT) {
+      flipper_status_off = true;
+      flipperSetBrightness(0);
+    }
+  }
+
+  bool flipperAnyWakeButtonPressed() {
+    return (digitalRead(35) == LOW) || (digitalRead(37) == LOW) || (digitalRead(39) == LOW);
+  }
+
+  void drawFlipperBatteryStatus(int bat) {
+    int screen_w = flipper_status_tft.width();
+    flipper_status_tft.drawRoundRect(screen_w - 42, 7, 34, FLIPPER_FP * FLIPPER_LH + 9, 2, FLIPPER_ORANGE);
+    flipper_status_tft.setTextSize(1);
+    flipper_status_tft.setTextColor(FLIPPER_ORANGE, FLIPPER_BG);
+    flipper_status_tft.drawRightString("  " + String(bat) + "%", screen_w - 45, 12, 1);
+    flipper_status_tft.fillRoundRect(screen_w - 40, 9, 30, FLIPPER_FP * FLIPPER_LH + 5, 2, FLIPPER_BG);
+    flipper_status_tft.fillRoundRect(screen_w - 40, 9, 30 * bat / 100, FLIPPER_FP * FLIPPER_LH + 5, 2, FLIPPER_ORANGE);
+    flipper_status_tft.drawLine(screen_w - 30, 9, screen_w - 30, 9 + FLIPPER_FP * FLIPPER_LH + 6, FLIPPER_BG);
+    flipper_status_tft.drawLine(screen_w - 20, 9, screen_w - 20, 9 + FLIPPER_FP * FLIPPER_LH + 6, FLIPPER_BG);
+  }
+
+  void drawFlipperStatusFrame() {
+    int screen_w = flipper_status_tft.width();
+    int screen_h = flipper_status_tft.height();
+    flipper_status_tft.fillScreen(TFT_BLACK);
+    flipper_status_tft.setTextDatum(0);
+    flipper_status_tft.setTextSize(FLIPPER_FP);
+    flipper_status_tft.drawRoundRect(5, 5, screen_w - 10, screen_h - 10, 5, FLIPPER_ORANGE);
+    flipper_status_tft.setTextColor(FLIPPER_ORANGE, FLIPPER_BG);
+    flipper_status_tft.drawString("Marauder", 12, 12, 1);
+    flipper_status_tft.drawLine(5, (6 + 6 + FLIPPER_FP * FLIPPER_LH + 5), screen_w - 6, (6 + 6 + FLIPPER_FP * FLIPPER_LH + 5), FLIPPER_ORANGE);
+  }
+
+  void drawFlipperStatusContent(bool force = false) {
+    int bat = getFlipperBatteryPercent();
+
+    flipper_status_tft.setTextColor(TFT_WHITE, FLIPPER_BG);
+    flipper_status_tft.fillRect(12, 34, 180, 12, FLIPPER_BG);
+    flipper_status_tft.drawString("Flipper Mode", 12, 34, 1);
+
+    flipper_status_tft.setTextColor(FLIPPER_ORANGE, FLIPPER_BG);
+    flipper_status_tft.fillRect(12, 46, 180, 12, FLIPPER_BG);
+    flipper_status_tft.drawString(flipperModeName(wifi_scan_obj.currentScanMode), 12, 46, 1);
+
+    flipper_status_tft.setTextColor(TFT_LIGHTGREY, FLIPPER_BG);
+    flipper_status_tft.fillRect(12, 58, 120, 12, FLIPPER_BG);
+    flipper_status_tft.drawString("CH: " + String(wifi_scan_obj.set_channel), 12, 58, 1);
+
+    flipper_status_tft.setTextColor(TFT_WHITE, FLIPPER_BG);
+    flipper_status_tft.fillRect(12, 70, 180, 12, FLIPPER_BG);
+    flipper_status_tft.drawString(wifi_scan_obj.scanning() ? "UART active" : "Waiting command", 12, 70, 1);
+
+    if (force || bat != flipper_status_prev_battery) {
+      drawFlipperBatteryStatus(bat);
+      flipper_status_prev_battery = bat;
+    }
+  }
+
+  const char* flipperModeName(uint8_t mode) {
+    switch (mode) {
+      case WIFI_SCAN_OFF: return "Idle";
+      case WIFI_SCAN_AP: return "Scan AP";
+      case WIFI_SCAN_ALL: return "Scan All";
+      case WIFI_SCAN_DEAUTH: return "Sniff Deauth";
+      case WIFI_SCAN_PROBE: return "Sniff Probe";
+      case WIFI_SCAN_EAPOL: return "Sniff PMKID";
+      case WIFI_SCAN_RAW_CAPTURE: return "Sniff Raw";
+      case WIFI_SCAN_PACKET_RATE: return "Packet Count";
+      case WIFI_SCAN_WAR_DRIVE: return "Wardrive";
+      case WIFI_SCAN_GPS_DATA: return "GPS Data";
+      case WIFI_SCAN_GPS_NMEA: return "NMEA Stream";
+      case BT_SCAN_ALL: return "BT Scan";
+      case BT_SCAN_FLIPPER: return "BT Flipper";
+      case BT_SCAN_AIRTAG: return "BT Airtag";
+      default: return "Running";
+    }
+  }
+
+  void drawFlipperStatusScreen(bool force = false) {
+    if (force) drawFlipperStatusFrame();
+    drawFlipperStatusContent(force);
+  }
+#endif
 
 // PWM Brightness Control
 #ifdef HAS_SCREEN
@@ -244,7 +394,11 @@ void setup()
     esp_spiram_init();
   #endif
 
-  Serial.begin(115200);
+  #if defined(MARAUDER_M5STICKCP2_FLIPPER)
+    Serial.begin(115200, SERIAL_8N1, /*RX=*/36, /*TX=*/26);
+  #else
+    Serial.begin(115200);
+  #endif
 
   while(!Serial)
     delay(10);
@@ -262,7 +416,20 @@ void setup()
     pinMode(POWER_HOLD_PIN, OUTPUT);
     digitalWrite(POWER_HOLD_PIN, HIGH);
   #endif
-  
+
+  #ifdef MARAUDER_M5STICKCP2_FLIPPER
+    pinMode(TFT_BL, OUTPUT);
+    flipperSetBrightness(100);
+    flipper_status_tft.init();
+    flipper_status_tft.setRotation(3);
+    delay(50);
+    flipper_status_last_activity = millis();
+    drawFlipperStatusScreen(true);
+    flipper_status_prev_mode = wifi_scan_obj.currentScanMode;
+    flipper_status_prev_channel = wifi_scan_obj.set_channel;
+    flipper_status_prev_scanning = wifi_scan_obj.scanning();
+  #endif
+
   #ifdef HAS_SCREEN
     pinMode(TFT_BL, OUTPUT);
   #endif
@@ -337,6 +504,10 @@ void setup()
   backlightOn(); // Need this
 
   #ifdef HAS_SCREEN
+    #ifdef MARAUDER_M5STICKCP2_FLIPPER
+      display_obj.headless_mode = true;
+    #endif
+
     // Do some stealth mode stuff
     #ifdef HAS_BUTTONS
       if (c_btn.justPressed()) {
@@ -465,7 +636,9 @@ void loop()
   if ((wifi_scan_obj.currentScanMode != WIFI_PACKET_MONITOR) ||
       (mini)) {
     #ifdef HAS_SCREEN
-      menu_function_obj.main(currentTime);
+      #ifndef MARAUDER_M5STICKCP2_FLIPPER
+        menu_function_obj.main(currentTime);
+      #endif
     #endif
   }
   #ifdef HAS_FLIPPER_LED
@@ -482,5 +655,39 @@ void loop()
     delay(1);
   #else
     delay(50);
+  #endif
+
+  #ifdef MARAUDER_M5STICKCP2_FLIPPER
+    if (flipperAnyWakeButtonPressed()) {
+      bool was_sleeping = flipper_status_dimmed || flipper_status_off;
+      flipperWakeScreen();
+      if (was_sleeping) {
+        drawFlipperStatusScreen(true);
+        flipper_status_last_draw = currentTime;
+      }
+    }
+
+    bool flipper_mode_changed = (flipper_status_prev_mode != wifi_scan_obj.currentScanMode);
+    bool flipper_status_changed =
+      flipper_mode_changed ||
+      (flipper_status_prev_channel != wifi_scan_obj.set_channel) ||
+      (flipper_status_prev_scanning != wifi_scan_obj.scanning());
+
+    if (flipper_mode_changed) {
+      flipperWakeScreen();
+    }
+
+    if (flipper_status_changed && !flipper_status_off) {
+      drawFlipperStatusScreen();
+      flipper_status_last_draw = currentTime;
+      flipper_status_prev_mode = wifi_scan_obj.currentScanMode;
+      flipper_status_prev_channel = wifi_scan_obj.set_channel;
+      flipper_status_prev_scanning = wifi_scan_obj.scanning();
+    } else if (!flipper_status_off && currentTime - flipper_status_last_draw >= 30000) {
+      drawFlipperStatusScreen();
+      flipper_status_last_draw = currentTime;
+    }
+
+    flipperPowerSaveTick();
   #endif
 }

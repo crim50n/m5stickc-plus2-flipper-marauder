@@ -7,10 +7,11 @@
   #define POLISH_POTATO
 
   //#define DEVELOPER
+  #define MARAUDER_M5STICKCP2_FLIPPER
 
   //// BOARD TARGETS
   //#define MARAUDER_M5STICKC
-  //#define MARAUDER_M5STICKCP2
+  #define MARAUDER_M5STICKCP2
   //#define MARAUDER_MINI
   //#define MARAUDER_V4
   //#define MARAUDER_V6
@@ -55,7 +56,9 @@
   #define MODE_CUSTOM 4
 
   //// HARDWARE NAMES
-  #ifdef MARAUDER_M5STICKC
+  #ifdef MARAUDER_M5STICKCP2_FLIPPER
+    #define HARDWARE_NAME "M5Stick-C Plus2 Flipper"
+  #elif defined(MARAUDER_M5STICKC)
     #define HARDWARE_NAME "M5Stick-C Plus"
   #elif defined(MARAUDER_M5STICKCP2)
     #define HARDWARE_NAME "M5Stick-C Plus2"
@@ -472,6 +475,24 @@
     //#define HAS_TEMP_SENSOR
     #define HAS_NIMBLE_2
     #define HAS_IDF_3
+  #endif
+
+  #ifdef MARAUDER_M5STICKCP2_FLIPPER
+    #undef HAS_SCREEN
+    #undef HAS_MINI_SCREEN
+    #undef HAS_BUTTONS
+    #undef HAS_MINI_KB
+    #undef HAS_GPS
+    #undef HAS_SD
+    #undef USE_SD
+
+    #define SD_CS -1
+    #define MEM_LOWER_LIM 10000
+    #define GPS_SERIAL_INDEX 1
+    #define GPS_TX 33
+    #define GPS_RX 32
+    #define I2C_SDA 33
+    #define I2C_SCL 22
   #endif
 
   #ifdef MARAUDER_V8
